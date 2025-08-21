@@ -1,0 +1,785 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>📊 LogsReader - Monitor em Tempo Real</title>
+    <script src="/socket.io/socket.io.js"></script>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: #333;
+            min-height: 100vh;
+        }
+
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+
+        .header {
+            background: rgba(255, 255, 255, 0.95);
+            backdrop-filter: blur(10px);
+            border-radius: 15px;
+            padding: 25px;
+            margin-bottom: 25px;
+            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.1);
+            text-align: center;
+        }
+
+        .header h1 {
+            color: #4a5568;
+            font-size: 2.5em;
+            margin-bottom: 10px;
+            background: linear-gradient(45deg, #667eea, #764ba2);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+
+        .status-bar {
+            display: flex;
+            justify-content: space-around;
+            flex-wrap: wrap;
+            gap: 15px;
+            margin-top: 20px;
+        }
+
+        .status-item {
+            background: linear-gradient(135deg, #4facfe 0%, #00f2fe 100%);
+            color: white;
+            padding: 15px 20px;
+            border-radius: 10px;
+            text-align: center;
+            min-width: 120px;
+            box-shadow: 0 4px 15px rgba(0, 0, 0, 0.1);
+        }
+
+        .status-item .value {
+            font-size: 2em;
+            font-weight: bold;
+            display: block;
+        }
+
+        .controls {
+            background: rgba(255, 255, 255, 0.95);
+            backdrop-filter: blur(10px);
+            border-radius: 15px;
+            padding: 20px;
+            margin-bottom: 25px;
+            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.1);
+        }
+
+        .control-group {
+            display: flex;
+            gap: 15px;
+            flex-wrap: wrap;
+            align-items: center;
+            margin-bottom: 15px;
+        }
+
+        .control-group:last-child {
+            margin-bottom: 0;
+        }
+
+        input, select, button {
+            padding: 12px 15px;
+            border: 2px solid #e2e8f0;
+            border-radius: 8px;
+            font-size: 14px;
+            transition: all 0.3s ease;
+        }
+
+        input:focus, select:focus {
+            outline: none;
+            border-color: #667eea;
+            box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1);
+        }
+
+        button {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            border: none;
+            cursor: pointer;
+            font-weight: 600;
+            transition: transform 0.2s ease;
+        }
+
+        button:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 6px 20px rgba(102, 126, 234, 0.3);
+        }
+
+        .connection-status {
+            padding: 8px 16px;
+            border-radius: 20px;
+            font-weight: bold;
+            display: inline-block;
+            margin-left: auto;
+        }
+
+        .connected {
+            background: #48bb78;
+            color: white;
+        }
+
+        .disconnected {
+            background: #f56565;
+            color: white;
+        }
+
+        .main-content {
+            display: grid;
+            grid-template-columns: 1fr 300px;
+            gap: 25px;
+        }
+
+        .logs-panel {
+            background: rgba(255, 255, 255, 0.95);
+            backdrop-filter: blur(10px);
+            border-radius: 15px;
+            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.1);
+            overflow: hidden;
+        }
+
+        .logs-header {
+            background: linear-gradient(135deg, #4a5568 0%, #2d3748 100%);
+            color: white;
+            padding: 20px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .logs-container {
+            height: 600px;
+            overflow-y: auto;
+            padding: 20px;
+            background: #ffffff;
+            font-family: 'Courier New', Monaco, monospace;
+        }
+
+        .log-entry {
+            background: none;
+            border: none;
+            margin: 0;
+            padding: 2px 0;
+            font-family: 'Courier New', Monaco, monospace;
+            font-size: 14px;
+            line-height: 1.2;
+            color: #333;
+            white-space: pre-wrap;
+            word-wrap: break-word;
+        }
+
+        .log-entry:hover {
+            background: #f0f8ff;
+        }
+
+        .highlight {
+            background-color: #ffff00 !important;
+            color: #000 !important;
+            font-weight: bold;
+            padding: 1px 2px;
+            border-radius: 2px;
+        }
+
+        .log-meta {
+            display: none;
+        }
+
+        .sidebar {
+            display: flex;
+            flex-direction: column;
+            gap: 20px;
+        }
+
+        .widget {
+            background: rgba(255, 255, 255, 0.95);
+            backdrop-filter: blur(10px);
+            border-radius: 15px;
+            padding: 20px;
+            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.1);
+        }
+
+        .widget h3 {
+            color: #4a5568;
+            margin-bottom: 15px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .file-list {
+            list-style: none;
+        }
+
+        .file-item {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 10px;
+            margin-bottom: 8px;
+            background: #f7fafc;
+            border-radius: 8px;
+            border-left: 4px solid #4299e1;
+        }
+
+        .file-item.active {
+            border-left-color: #48bb78;
+            background: #f0fff4;
+        }
+
+        .stats-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 10px;
+        }
+
+        .stat-item {
+            text-align: center;
+            padding: 15px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            border-radius: 10px;
+        }
+
+        .stat-value {
+            font-size: 1.8em;
+            font-weight: bold;
+            display: block;
+        }
+
+        .auto-scroll {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            margin-left: auto;
+        }
+
+        .switch {
+            position: relative;
+            display: inline-block;
+            width: 50px;
+            height: 24px;
+        }
+
+        .switch input {
+            opacity: 0;
+            width: 0;
+            height: 0;
+        }
+
+        .slider {
+            position: absolute;
+            cursor: pointer;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background-color: #ccc;
+            transition: .4s;
+            border-radius: 24px;
+        }
+
+        .slider:before {
+            position: absolute;
+            content: "";
+            height: 18px;
+            width: 18px;
+            left: 3px;
+            bottom: 3px;
+            background-color: white;
+            transition: .4s;
+            border-radius: 50%;
+        }
+
+        input:checked + .slider {
+            background-color: #48bb78;
+        }
+
+        input:checked + .slider:before {
+            transform: translateX(26px);
+        }
+
+        .pulse {
+            animation: pulse 2s infinite;
+        }
+
+        @keyframes pulse {
+            0% { opacity: 1; }
+            50% { opacity: 0.5; }
+            100% { opacity: 1; }
+        }
+
+        @media (max-width: 768px) {
+            .main-content {
+                grid-template-columns: 1fr;
+            }
+            
+            .control-group {
+                flex-direction: column;
+                align-items: stretch;
+            }
+            
+            .header h1 {
+                font-size: 2em;
+            }
+        }
+
+        .loading {
+            text-align: center;
+            padding: 40px;
+            color: #666;
+        }
+
+        .spinner {
+            border: 4px solid #f3f3f3;
+            border-top: 4px solid #667eea;
+            border-radius: 50%;
+            width: 40px;
+            height: 40px;
+            animation: spin 2s linear infinite;
+            margin: 20px auto;
+        }
+
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>📊 LogsReader - Monitor em Tempo Real</h1>
+            <p>Monitoramento avançado de arquivos de log com atualizações em tempo real</p>
+            
+            <div class="status-bar">
+                <div class="connection-status disconnected" id="connection-status">
+                    🔴 Desconectado
+                </div>
+            </div>
+        </div>
+
+        <div class="controls">
+            <div class="control-group">
+                <input type="text" id="highlight-input" placeholder="Destacar (separadas por vírgula)...">
+                
+                <button onclick="clearLogs()">🗑️ Limpar</button>
+                <button onclick="exportLogs()">💾 Exportar</button>
+            </div>
+        </div>
+
+        <div class="main-content">
+            <div class="logs-panel">
+                <div class="logs-header">
+                    <h3>📜 Logs em Tempo Real</h3>
+                    <div class="auto-scroll">
+                        <span>Auto-scroll:</span>
+                        <label class="switch">
+                            <input type="checkbox" id="auto-scroll" checked>
+                            <span class="slider"></span>
+                        </label>
+                    </div>
+                </div>
+                <div class="logs-container" id="logs-container">
+                    <div class="loading">
+                        <div class="spinner"></div>
+                        <p>Conectando ao servidor...</p>
+                    </div>
+                </div>
+            </div>
+
+            <div class="sidebar">
+                <div class="widget">
+                    <h3>📁 Arquivos Monitorados</h3>
+                    <ul class="file-list" id="file-list">
+                        <li>Carregando...</li>
+                    </ul>
+                </div>
+
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // Global variables
+        let socket;
+        let logs = [];
+        let filteredLogs = [];
+        let files = new Map();
+        let stats = { error: 0, warning: 0, info: 0, debug: 0 };
+        let autoScroll = true;
+        let isConnected = false;
+
+        // DOM elements
+        const logsContainer = document.getElementById('logs-container');
+        const connectionStatus = document.getElementById('connection-status');
+        const fileList = document.getElementById('file-list');
+        const autoScrollToggle = document.getElementById('auto-scroll');
+        
+        // Optional elements (may not exist in current version)
+        const filesCount = document.getElementById('files-count');
+        const entriesCount = document.getElementById('entries-count');
+        const clientsCount = document.getElementById('clients-count');
+        const searchInput = document.getElementById('search-input');
+        const levelFilter = document.getElementById('level-filter');
+        const fileFilter = document.getElementById('file-filter');
+
+        // Initialize connection
+        function initSocket() {
+            socket = io();
+
+            socket.on('connect', () => {
+                console.log('✅ Conectado ao servidor');
+                isConnected = true;
+                updateConnectionStatus();
+            });
+
+            socket.on('disconnect', () => {
+                console.log('❌ Desconectado do servidor');
+                isConnected = false;
+                updateConnectionStatus();
+            });
+
+            socket.on('initialData', (data) => {
+                console.log('📥 Dados iniciais recebidos:', data);
+                
+                // Update files
+                files.clear();
+                data.files.forEach(file => {
+                    files.set(file.name, file);
+                });
+                
+                // Update logs
+                logs = data.entries || [];
+                
+                // Update UI
+                updateFilesDisplay();
+                updateFileFilter();
+                applyFilters();
+                updateStats();
+                updateCounters(data.stats);
+            });
+
+            socket.on('newLogEntry', (entry) => {
+                console.log('📝 Nova entrada de log:', entry);
+                
+                logs.unshift(entry);
+                if (logs.length > 1000) {
+                    logs = logs.slice(0, 1000);
+                }
+                
+                updateStats();
+                applyFilters();
+                
+                // Add visual notification
+                addNotification(entry);
+            });
+
+            socket.on('fileAdded', (data) => {
+                console.log('📁 Novo arquivo adicionado:', data.filename);
+                // Refresh files list
+                refreshFilesFromAPI();
+            });
+
+            socket.on('fileRemoved', (data) => {
+                console.log('🗑️ Arquivo removido:', data.filename);
+                files.delete(data.filename);
+                updateFilesDisplay();
+                updateFileFilter();
+            });
+        }
+
+        function updateConnectionStatus() {
+            if (isConnected) {
+                connectionStatus.className = 'connection-status connected';
+                connectionStatus.innerHTML = '🟢 Conectado';
+            } else {
+                connectionStatus.className = 'connection-status disconnected pulse';
+                connectionStatus.innerHTML = '🔴 Desconectado';
+            }
+        }
+
+        function updateCounters(statsData) {
+            if (statsData) {
+                if (filesCount) filesCount.textContent = statsData.totalFiles || 0;
+                if (entriesCount) entriesCount.textContent = statsData.totalEntries || 0;
+                if (clientsCount) clientsCount.textContent = statsData.connectedClients || 0;
+            }
+        }
+
+        function updateFilesDisplay() {
+            fileList.innerHTML = '';
+            
+            if (files.size === 0) {
+                fileList.innerHTML = '<li style="text-align: center; color: #666; padding: 20px;">Nenhum arquivo .log encontrado<br><small>Adicione arquivos .log na pasta /logs</small></li>';
+                return;
+            }
+            
+            files.forEach((file, filename) => {
+                const li = document.createElement('li');
+                li.className = 'file-item active';
+                li.innerHTML = `
+                    <div>
+                        <strong>${filename}</strong>
+                        <br><small>${formatFileSize(file.size)}</small>
+                    </div>
+                    <div>📁</div>
+                `;
+                fileList.appendChild(li);
+            });
+        }
+
+        function updateFileFilter() {
+            if (!fileFilter) return;
+            
+            const currentValue = fileFilter.value;
+            fileFilter.innerHTML = '<option value="">Todos os arquivos</option>';
+            
+            files.forEach((file, filename) => {
+                const option = document.createElement('option');
+                option.value = filename;
+                option.textContent = filename;
+                fileFilter.appendChild(option);
+            });
+            
+            fileFilter.value = currentValue;
+        }
+
+        function applyFilters() {
+            const searchTerm = searchInput ? searchInput.value.toLowerCase() : '';
+            const levelFilterValue = levelFilter ? levelFilter.value : '';
+            const fileFilterValue = fileFilter ? fileFilter.value : '';
+            
+            filteredLogs = logs.filter(log => {
+                const matchesSearch = !searchTerm || log.content.toLowerCase().includes(searchTerm);
+                const matchesLevel = !levelFilterValue || log.level === levelFilterValue;
+                const matchesFile = !fileFilterValue || log.filename === fileFilterValue;
+                
+                return matchesSearch && matchesLevel && matchesFile;
+            });
+            
+            displayLogs();
+        }
+
+        function displayLogs() {
+            if (filteredLogs.length === 0) {
+                logsContainer.innerHTML = '<div style="text-align: center; color: #666; padding: 40px;">Nenhum log encontrado com os filtros aplicados</div>';
+                return;
+            }
+            
+            const highlightTerms = getHighlightTerms();
+            
+            const html = filteredLogs.slice(0, 200).map(log => {
+                let content = escapeHtml(log.content);
+                
+                // Apply highlighting
+                if (highlightTerms.length > 0) {
+                    content = applyHighlight(content, highlightTerms);
+                }
+                
+                return `<div class="log-entry">${content}</div>`;
+            }).join('');
+            
+            logsContainer.innerHTML = html;
+            
+            if (autoScroll) {
+                logsContainer.scrollTop = 0;
+            }
+        }
+
+        function getHighlightTerms() {
+            const highlightInput = document.getElementById('highlight-input');
+            if (!highlightInput || !highlightInput.value.trim()) {
+                return [];
+            }
+            
+            return highlightInput.value
+                .split(',')
+                .map(term => term.trim())
+                .filter(term => term.length > 0);
+        }
+
+        function applyHighlight(text, terms) {
+            let highlightedText = text;
+            
+            terms.forEach(term => {
+                if (term.length > 0) {
+                    const regex = new RegExp(`(${escapeRegExp(term)})`, 'gi');
+                    highlightedText = highlightedText.replace(regex, '<span class="highlight">$1</span>');
+                }
+            });
+            
+            return highlightedText;
+        }
+
+        function escapeRegExp(string) {
+            return string.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+        }
+
+        function updateStats() {
+            stats = { error: 0, warning: 0, info: 0, debug: 0 };
+            
+            logs.forEach(log => {
+                stats[log.level] = (stats[log.level] || 0) + 1;
+            });
+            
+            const errorCount = document.getElementById('error-count');
+            const warningCount = document.getElementById('warning-count');
+            const infoCount = document.getElementById('info-count');
+            const debugCount = document.getElementById('debug-count');
+            
+            if (errorCount) errorCount.textContent = stats.error || 0;
+            if (warningCount) warningCount.textContent = stats.warning || 0;
+            if (infoCount) infoCount.textContent = stats.info || 0;
+            if (debugCount) debugCount.textContent = stats.debug || 0;
+        }
+
+        function addNotification(entry) {
+            // Visual notification for new entries
+            if (entry.level === 'error') {
+                showToast(`❌ Novo erro detectado em ${entry.filename}`, 'error');
+            } else if (entry.level === 'warning') {
+                showToast(`⚠️ Novo aviso em ${entry.filename}`, 'warning');
+            }
+        }
+
+        function showToast(message, type = 'info') {
+            // Simple toast notification
+            const toast = document.createElement('div');
+            toast.style.cssText = `
+                position: fixed;
+                top: 20px;
+                right: 20px;
+                background: ${type === 'error' ? '#f56565' : type === 'warning' ? '#ed8936' : '#4299e1'};
+                color: white;
+                padding: 15px 20px;
+                border-radius: 8px;
+                box-shadow: 0 4px 12px rgba(0,0,0,0.2);
+                z-index: 10000;
+                animation: slideInRight 0.3s ease-out;
+                max-width: 400px;
+            `;
+            toast.textContent = message;
+            
+            document.body.appendChild(toast);
+            
+            setTimeout(() => {
+                toast.style.animation = 'slideOutRight 0.3s ease-in';
+                setTimeout(() => {
+                    document.body.removeChild(toast);
+                }, 300);
+            }, 3000);
+        }
+
+        function clearLogs() {
+            if (confirm('Tem certeza que deseja limpar todos os logs da interface?')) {
+                logs = [];
+                filteredLogs = [];
+                displayLogs();
+                updateStats();
+                showToast('✅ Logs limpos da interface');
+            }
+        }
+
+        function exportLogs() {
+            const dataStr = JSON.stringify(filteredLogs, null, 2);
+            const dataBlob = new Blob([dataStr], {type: 'application/json'});
+            const url = URL.createObjectURL(dataBlob);
+            
+            const link = document.createElement('a');
+            link.href = url;
+            link.download = `logs_export_${new Date().toISOString().slice(0,10)}.json`;
+            link.click();
+            
+            URL.revokeObjectURL(url);
+            showToast('✅ Logs exportados com sucesso');
+        }
+
+        function refreshFilesFromAPI() {
+            fetch('/api/files')
+                .then(response => response.json())
+                .then(data => {
+                    files.clear();
+                    data.files.forEach(file => {
+                        files.set(file.name, file);
+                    });
+                    updateFilesDisplay();
+                    updateFileFilter();
+                })
+                .catch(error => {
+                    console.error('Erro ao carregar arquivos:', error);
+                });
+        }
+
+        function formatFileSize(bytes) {
+            if (bytes === 0) return '0 B';
+            const k = 1024;
+            const sizes = ['B', 'KB', 'MB', 'GB'];
+            const i = Math.floor(Math.log(bytes) / Math.log(k));
+            return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + ' ' + sizes[i];
+        }
+
+        function escapeHtml(text) {
+            const div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML;
+        }
+
+        // Event listeners
+        const highlightInput = document.getElementById('highlight-input');
+        if (searchInput) searchInput.addEventListener('input', applyFilters);
+        if (highlightInput) highlightInput.addEventListener('input', applyFilters);
+        if (levelFilter) levelFilter.addEventListener('change', applyFilters);
+        if (fileFilter) fileFilter.addEventListener('change', applyFilters);
+        if (autoScrollToggle) {
+            autoScrollToggle.addEventListener('change', (e) => {
+                autoScroll = e.target.checked;
+            });
+        }
+
+        // Add CSS animations
+        const style = document.createElement('style');
+        style.textContent = `
+            @keyframes slideInRight {
+                from { transform: translateX(100%); opacity: 0; }
+                to { transform: translateX(0); opacity: 1; }
+            }
+            @keyframes slideOutRight {
+                from { transform: translateX(0); opacity: 1; }
+                to { transform: translateX(100%); opacity: 0; }
+            }
+        `;
+        document.head.appendChild(style);
+
+        // Initialize the application
+        document.addEventListener('DOMContentLoaded', () => {
+            console.log('🚀 Inicializando LogsReader...');
+            initSocket();
+            
+            // Refresh data every 30 seconds
+            setInterval(() => {
+                if (isConnected) {
+                    fetch('/api/stats')
+                        .then(response => response.json())
+                        .then(data => {
+                            if (data.success) {
+                                updateCounters(data.stats);
+                            }
+                        })
+                        .catch(error => console.error('Erro ao atualizar estatísticas:', error));
+                }
+            }, 30000);
+        });
+    </script>
+</body>
+</html>

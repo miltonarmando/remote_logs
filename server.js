@@ -25,7 +25,7 @@ app.use(express.static('public'));
 // Configuration
 const now = new Date();
 const formattedDate = now.toISOString().slice(0, 10).replace(/-/g, '');
-const LOG_DIRECTORY = process.env.LOG_DIR || './logs';
+const LOG_DIRECTORY = process.env.LOG_DIR || '/run/user/1000/gvfs/smb-share:server=10.12.100.19,share=t$/ACT/Logs/ACTSentinel/';
 const LOG_FILE = 'ACTSentinel' + formattedDate + '.log'
 const PORT = process.env.PORT || 3000;
 
@@ -42,38 +42,22 @@ let connectedClients = 0;
 // Ensure log directory exists
 //if (!fs.existsSync(LOG_DIRECTORY)) {
   //fs.mkdirSync(LOG_DIRECTORY, { recursive: true });
-  //console.log(`📁 Created log directory: ${LOG_DIRECTORY}`);
 //}
 
 // Utility functions
 function parseLogEntry(line, filename) {
-  const timestamp = moment().format('YYYY-MM-DD HH:mm:ss');
-  const entry = {
+  return {
     id: Date.now() + Math.random(),
-    timestamp,
+    timestamp: moment().format('YYYY-MM-DD HH:mm:ss'),
     filename,
     content: line.trim(),
-    level: detectLogLevel(line),
     size: line.length
   };
-  
-  return entry;
-}
-
-function detectLogLevel(line) {
-  const lowercaseLine = line.toLowerCase();
-  if (lowercaseLine.includes('error') || lowercaseLine.includes('err')) return 'error';
-  if (lowercaseLine.includes('warn') || lowercaseLine.includes('warning')) return 'warning';
-  if (lowercaseLine.includes('info')) return 'info';
-  if (lowercaseLine.includes('debug')) return 'debug';
-  return 'info';
 }
 
 function addLogEntry(entry) {
   logData.entries.unshift(entry);
-  if (logData.entries.length > logData.maxEntries) {
-    logData.entries = logData.entries.slice(0, logData.maxEntries);
-  }
+  logData.entries.length > logData.maxEntries && (logData.entries.length = logData.maxEntries);
 }
 
 function startTailing(filePath) {
@@ -85,30 +69,20 @@ function startTailing(filePath) {
     const tail = new Tail(filePath, {
       fromBeginning: false,
       follow: true,
-      useWatchFile: true
+      useWatchFile: true,
+      fsWatchOptions: { interval: 100 }
     });
 
     tail.on('line', (data) => {
       const filename = path.basename(filePath);
       const entry = parseLogEntry(data, filename);
-      
       addLogEntry(entry);
-      
-      // Emit to all connected clients
       io.emit('newLogEntry', entry);
-      
-      console.log(`📝 [${filename}] New log entry: ${data.substring(0, 100)}${data.length > 100 ? '...' : ''}`);
-    });
-
-    tail.on('error', (error) => {
-      console.error(`❌ Error tailing file ${filePath}:`, error);
     });
 
     activeTails.set(filePath, tail);
-    console.log(`👁️  Started tailing: ${filePath}`);
-    
   } catch (error) {
-    console.error(`❌ Failed to start tailing ${filePath}:`, error);
+    // Silently handle error
   }
 }
 
@@ -117,25 +91,19 @@ function stopTailing(filePath) {
   if (tail) {
     tail.unwatch();
     activeTails.delete(filePath);
-    console.log(`⏹️  Stopped tailing: ${filePath}`);
   }
 }
 
 function scanLogDirectory() {
-  console.log(`🔍 Scanning log directory: ${LOG_DIRECTORY}`);
-  
   try {
-    const files = fs.readdirSync(LOG_DIRECTORY);
-    const logFiles = files.filter(file => file.endsWith('.log'));
+    const filePath = path.join(LOG_DIRECTORY, LOG_FILE);
     
-    logData.files.clear();
-    
-    logFiles.forEach(file => {
-      const filePath = path.join(LOG_DIRECTORY, file);
+    if (fs.existsSync(filePath)) {
       const stats = fs.statSync(filePath);
       
-      logData.files.set(file, {
-        name: file,
+      logData.files.clear();
+      logData.files.set(LOG_FILE, {
+        name: LOG_FILE,
         path: filePath,
         size: stats.size,
         modified: stats.mtime,
@@ -143,26 +111,25 @@ function scanLogDirectory() {
       });
       
       startTailing(filePath);
-    });
-    
-    console.log(`📊 Found ${logFiles.length} log files`);
-    
+    }
   } catch (error) {
-    console.error('❌ Error scanning log directory:', error);
+    // Silently handle error
   }
 }
 
-// Watch for new/deleted log files
-const watcher = chokidar.watch(`${LOG_DIRECTORY}/${LOG_FILE}`, {
-  ignored: /^\./, 
-  persistent: true
+// Watch for specific log file
+const watcher = chokidar.watch(path.join(LOG_DIRECTORY, LOG_FILE), {
+  persistent: true,
+  awaitWriteFinish: {
+    stabilityThreshold: 2000,
+    pollInterval: 100
+  }
 });
 
 watcher.on('add', (filePath) => {
   const filename = path.basename(filePath);
-  console.log(`➕ New log file detected: ${filename}`);
-  
   const stats = fs.statSync(filePath);
+  
   logData.files.set(filename, {
     name: filename,
     path: filePath,
@@ -177,8 +144,6 @@ watcher.on('add', (filePath) => {
 
 watcher.on('unlink', (filePath) => {
   const filename = path.basename(filePath);
-  console.log(`➖ Log file removed: ${filename}`);
-  
   stopTailing(filePath);
   logData.files.delete(filename);
   io.emit('fileRemoved', { filename });
@@ -187,7 +152,6 @@ watcher.on('unlink', (filePath) => {
 // Socket.IO connection handling
 io.on('connection', (socket) => {
   connectedClients++;
-  console.log(`🔌 Client connected. Total clients: ${connectedClients}`);
   
   // Send current data to new client
   socket.emit('initialData', {
@@ -202,7 +166,6 @@ io.on('connection', (socket) => {
   
   socket.on('disconnect', () => {
     connectedClients--;
-    console.log(`🔌 Client disconnected. Total clients: ${connectedClients}`);
   });
   
   socket.on('requestMoreEntries', (data) => {
@@ -228,7 +191,6 @@ app.get('/api/logs', (req, res) => {
   const { 
     page = 1, 
     limit = 50, 
-    level, 
     filename, 
     search,
     since 
@@ -236,18 +198,14 @@ app.get('/api/logs', (req, res) => {
   
   let filteredEntries = logData.entries;
   
-  // Apply filters
-  if (level) {
-    filteredEntries = filteredEntries.filter(entry => entry.level === level);
-  }
-  
   if (filename) {
     filteredEntries = filteredEntries.filter(entry => entry.filename === filename);
   }
   
   if (search) {
+    const searchLower = search.toLowerCase();
     filteredEntries = filteredEntries.filter(entry => 
-      entry.content.toLowerCase().includes(search.toLowerCase())
+      entry.content.toLowerCase().includes(searchLower)
     );
   }
   
@@ -317,7 +275,6 @@ app.get('/api/stream', (req, res) => {
   });
   
   const clientId = Date.now();
-  console.log(`📡 SSE client connected: ${clientId}`);
   
   // Send initial data
   res.write(`data: ${JSON.stringify({
@@ -337,7 +294,6 @@ app.get('/api/stream', (req, res) => {
   io.on('newLogEntry', onNewEntry);
   
   req.on('close', () => {
-    console.log(`📡 SSE client disconnected: ${clientId}`);
     io.off('newLogEntry', onNewEntry);
   });
 });
@@ -362,25 +318,18 @@ app.get('/', (req, res) => {
 function init() {
   console.log('🚀 Starting LogsReader Real-time Monitor...');
   console.log(`📁 Log directory: ${path.resolve(LOG_DIRECTORY)}`);
+  console.log(`📄 Monitoring file: ${LOG_FILE}`);
   
   scanLogDirectory();
   
   server.listen(PORT, () => {
     console.log(`\n🌟 LogsReader Server is running!`);
     console.log(`🌐 Web Interface: http://localhost:${PORT}`);
-    console.log(`🔗 API Base URL: http://localhost:${PORT}/api`);
-    console.log(`📡 WebSocket Server: ws://localhost:${PORT}`);
-    console.log(`📊 Statistics: http://localhost:${PORT}/api/stats`);
-    console.log(`📜 Live Stream (SSE): http://localhost:${PORT}/api/stream`);
-    console.log(`\n💡 Place your .log files in: ${path.resolve(LOG_DIRECTORY)}`);
-    console.log(`🔄 Files will be monitored automatically for changes!\n`);
   });
 }
 
 // Graceful shutdown
 process.on('SIGINT', () => {
-  console.log('\n🛑 Shutting down gracefully...');
-  
   // Stop all file tails
   activeTails.forEach((tail, filePath) => {
     stopTailing(filePath);
@@ -390,7 +339,6 @@ process.on('SIGINT', () => {
   watcher.close();
   
   server.close(() => {
-    console.log('✅ Server closed successfully');
     process.exit(0);
   });
 });

@@ -439,20 +439,16 @@
             socket = io();
 
             socket.on('connect', () => {
-                console.log('✅ Conectado ao servidor');
                 isConnected = true;
                 updateConnectionStatus();
             });
 
             socket.on('disconnect', () => {
-                console.log('❌ Desconectado do servidor');
                 isConnected = false;
                 updateConnectionStatus();
             });
 
             socket.on('initialData', (data) => {
-                console.log('📥 Dados iniciais recebidos:', data);
-                
                 // Update files
                 files.clear();
                 data.files.forEach(file => {
@@ -578,6 +574,7 @@
             }
             
             const highlightTerms = getHighlightTerms();
+            const wasAtTop = logsContainer.scrollTop === 0;
             
             const html = filteredLogs.slice(0, 200).map(log => {
                 let content = escapeHtml(log.content);
@@ -592,7 +589,8 @@
             
             logsContainer.innerHTML = html;
             
-            if (autoScroll) {
+            // Só faz auto-scroll se estiver habilitado E o usuário estiver no topo
+            if (autoScroll && wasAtTop) {
                 logsContainer.scrollTop = 0;
             }
         }

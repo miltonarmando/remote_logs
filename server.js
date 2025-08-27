@@ -23,7 +23,10 @@ app.use(express.json());
 app.use(express.static('public'));
 
 // Configuration
+const now = new Date();
+const formattedDate = now.toISOString().slice(0, 10).replace(/-/g, '');
 const LOG_DIRECTORY = process.env.LOG_DIR || './logs';
+const LOG_FILE = 'ACTSentinel' + formattedDate + '.log'
 const PORT = process.env.PORT || 3000;
 
 // Storage for log data
@@ -37,10 +40,10 @@ let activeTails = new Map();
 let connectedClients = 0;
 
 // Ensure log directory exists
-if (!fs.existsSync(LOG_DIRECTORY)) {
-  fs.mkdirSync(LOG_DIRECTORY, { recursive: true });
-  console.log(`📁 Created log directory: ${LOG_DIRECTORY}`);
-}
+//if (!fs.existsSync(LOG_DIRECTORY)) {
+  //fs.mkdirSync(LOG_DIRECTORY, { recursive: true });
+  //console.log(`📁 Created log directory: ${LOG_DIRECTORY}`);
+//}
 
 // Utility functions
 function parseLogEntry(line, filename) {
@@ -150,7 +153,7 @@ function scanLogDirectory() {
 }
 
 // Watch for new/deleted log files
-const watcher = chokidar.watch(`${LOG_DIRECTORY}/*.log`, {
+const watcher = chokidar.watch(`${LOG_DIRECTORY}/${LOG_FILE}`, {
   ignored: /^\./, 
   persistent: true
 });
